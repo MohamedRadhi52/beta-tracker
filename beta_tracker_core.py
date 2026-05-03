@@ -170,9 +170,7 @@ def estimer_couleur_prise(image, resultats_prises, idx: int) -> tuple[str, float
         return couleur_neutre, round(ratio_neutre, 2)
 
     masque_colore = (saturation > 0.15) & (value > 0.2)
-    if masque_colore.sum() < max(8, nb_pixels * 0.08):
-        return couleur_neutre, round(ratio_neutre, 2)
-
+    
     votes = {couleur: 0 for couleur in COULEURS_PRISES if couleur not in {"noire", "blanche", "grise"}}
     for h in hue[masque_colore]:
         votes[_nom_couleur_depuis_hue(float(h))] += 1
