@@ -1,5 +1,4 @@
-# Évalue le modèle de détection de prises sur le jeu de test Roboflow.
-# Usage : python scripts/evaluate.py [--split test|val]
+# script d'evaluation YOLO
 import argparse
 import sys
 from pathlib import Path
@@ -37,23 +36,22 @@ def main():
         verbose=False,
     )
 
-    # Segmentation et détection ont des attributs différents.
     box = getattr(metrics, "box", None)
     seg = getattr(metrics, "seg", None)
 
     if box is not None:
         print("\n--- Détection (boîtes) ---")
-        print(f"  mAP@50      : {box.map50:.4f}")
-        print(f"  mAP@50-95   : {box.map:.4f}")
-        print(f"  Précision   : {box.mp:.4f}")
-        print(f"  Rappel      : {box.mr:.4f}")
+        print(f"  mAP@50: {box.map50:.4f}")
+        print(f"  mAP@50-95: {box.map:.4f}")
+        print(f"  Précision: {box.mp:.4f}")
+        print(f"  Rappel: {box.mr:.4f}")
 
     if seg is not None:
         print("\n--- Segmentation (masques) ---")
-        print(f"  mAP@50      : {seg.map50:.4f}")
-        print(f"  mAP@50-95   : {seg.map:.4f}")
-        print(f"  Précision   : {seg.mp:.4f}")
-        print(f"  Rappel      : {seg.mr:.4f}")
+        print(f"  mAP@50: {seg.map50:.4f}")
+        print(f"  mAP@50-95: {seg.map:.4f}")
+        print(f"  Précision: {seg.mp:.4f}")
+        print(f"  Rappel: {seg.mr:.4f}")
 
     if box is None and seg is None:
         print("Aucune métrique disponible — vérifiez le type de modèle.")

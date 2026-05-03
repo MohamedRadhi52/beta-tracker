@@ -1,23 +1,16 @@
-# Beta-Tracker - Analyse d'escalade
+# Beta-Tracker
 
-Beta-Tracker aide à analyser une image ou une vidéo d'escalade. Il détecte les prises, repère la posture du grimpeur, puis cherche les contacts entre les mains/pieds et les prises.
-
-L'objectif est de reconstruire une première version du **béta**, c'est-à-dire la suite des mouvements utilisés sur un bloc.
-
-## Démonstration
-
-Voici un aperçu du résultat de l'analyse sur une image (à gauche l'image originale, à droite l'image avec le squelette et les prises en contact surlignées) :
+Outil d'analyse vidéo/image pour l'escalade. Détecte les prises, la posture du grimpeur et track les contacts mains/pieds pour reconstruire le béta d'un bloc.
 
 ![Démonstration avant/après analyse de l'image](resulats_photo.png)
 
-
 ## Comment ça marche
 
-Le projet combine deux modèles YOLO :
-- **Détection de prises** (`holds_model.pt`) : modèle entraîné sur le dataset Climbing Hold Detection (Roboflow)
-- **Estimation de posture** (`yolov8n-pose.pt`) : modèle YOLOv8n-pose d'Ultralytics
+Le pipeline repose sur deux modèles YOLOv8 :
+- `holds_model.pt` : Détection/segmentation des prises (fine-tuné sur Climbing Hold Detection).
+- `yolov8n-pose.pt` : Estimation de posture (Ultralytics).
 
-Pour chaque image, le code compare la position des poignets et des chevilles avec les prises détectées. Si un membre est assez proche d'une prise, le projet l'ajoute comme contact possible. La couleur de la prise est estimée à partir de l'image.
+Le script croise les keypoints (poignets, chevilles) avec les bounding boxes des prises. Les couleurs des prises sont ensuite déduites via conversion HSV sur les pixels utiles.
 
 ## Installation
 
@@ -140,23 +133,3 @@ python scripts/download.py
 ### Ré-entraînement
 
 python scripts/train.py
-
-
-## Dépendances principales
-
-| Librairie | Usage |
-|---|---|
-| `ultralytics` | Modèles YOLO (détection + pose) |
-| `streamlit` | Interface web |
-| `opencv-python-headless` | Traitement vidéo/image |
-| `Pillow` | Manipulation d'images |
-| `numpy` / `pandas` | Calculs et tableaux de données |
-
-## Membres détectés
-
-| Membre | Couleur |
-|---|---|
-| Poignet Gauche | Orange |
-| Poignet Droit | Bleu |
-| Cheville Gauche | Vert |
-| Cheville Droite | Violet |

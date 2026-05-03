@@ -35,18 +35,18 @@ def main():
 
     image_path = require_file(args.image, "Image de test")
 
-    print("1. Détection des prises...")
-    resultats_prises = model_prises(str(image_path), verbose=False)[0]
-    print(f"   Prises detectees : {len(resultats_prises.boxes)}")
+    print("Détection des prises...")
+    res_prises = model_prises(str(image_path), verbose=False)[0]
+    print(f"   Prises detectees : {len(res_prises.boxes)}")
 
-    print("2. Détection du grimpeur...")
-    resultats_pose = model_pose(str(image_path), verbose=False)[0]
-    nb_personnes = 0 if resultats_pose.keypoints is None else len(resultats_pose.keypoints)
+    print("Détection du grimpeur...")
+    res_pose = model_pose(str(image_path), verbose=False)[0]
+    nb_personnes = 0 if res_pose.keypoints is None else len(res_pose.keypoints)
     print(f"   Personnes detectees : {nb_personnes}")
 
     contacts = detect_contacts(
-        resultats_prises,
-        resultats_pose,
+        res_prises,
+        res_pose,
         seuil_confiance=args.seuil_pose,
         seuil_confiance_prise=args.seuil_prise,
         image=image_path,
@@ -56,7 +56,7 @@ def main():
     if not contacts:
         print("Aucun contact detecte. Essayez par exemple --dist-frac 0.08 si l'image est large ou eloignee.")
     else:
-        print(f"3. Contacts detectes : {len(contacts)}")
+        print(f"Contacts detectes : {len(contacts)}")
         for contact in contacts:
             print(
                 "   CONTACT : "

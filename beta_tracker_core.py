@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Iterable
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -29,6 +30,13 @@ ARTICULATIONS = {
 
 COULEURS_PRISES = ["rouge", "orange", "jaune", "verte", "bleue", "violette", "rose", "noire", "blanche", "grise"]
 
+COULEURS_MEMBRES = {
+    "Poignet Gauche": (255, 140, 0),
+    "Poignet Droit": (30, 144, 255),
+    "Cheville Gauche": (50, 205, 50),
+    "Cheville Droite": (186, 85, 211),
+}
+
 
 def require_file(path: str | Path, description: str) -> Path:
     resolved_path = Path(path).expanduser()
@@ -42,8 +50,7 @@ def require_file(path: str | Path, description: str) -> Path:
 
 
 def est_en_contact_ellipse(px: float, py: float, boite: Iterable[float], marge: float = 0.2) -> bool:
-    # Detecte si un point est dans une ellipse centree sur la boite de la prise.
-    # La marge reduit la zone utile pour limiter les faux contacts en bordure.
+    # verifie si on est dans l'ellipse de la bounding box (marge pour limiter les faux contacts)
     x_min, y_min, x_max, y_max = [float(value) for value in boite]
     cx = (x_min + x_max) / 2
     cy = (y_min + y_max) / 2
@@ -56,10 +63,10 @@ def est_en_contact_ellipse(px: float, py: float, boite: Iterable[float], marge: 
     return ((px - cx) ** 2 / rayon_x**2 + (py - cy) ** 2 / rayon_y**2) <= 1.0
 
 
-def get_type_prise(resultats_prises, idx: int) -> str:
+def get_type_prise(res_prises, idx: int) -> str:
     try:
-        cls_id = int(resultats_prises.boxes.cls[idx].item())
-        return resultats_prises.names.get(cls_id, "inconnue")
+        cls_id = int(res_prises.boxes.cls[idx].item())
+        return res_prises.names.get(cls_id, "inconnue")
     except (AttributeError, IndexError, KeyError, TypeError, ValueError):
         return "inconnue"
 
@@ -79,8 +86,7 @@ def _distance_point_centre(px: float, py: float, boite: Iterable[float]) -> floa
 
 
 def signature_contact(contact: dict, spatial_bucket: float = 24.0) -> tuple:
-    # Signature stable pour dedupliquer les contacts video en evenements de beta.
-    # Le bucket spatial evite qu'une boite quasi identique cree un nouvel evenement.
+    # hash/signature du contact pour dedupliquer la timeline (avec un arrondi spatial)
     x_min, y_min, x_max, y_max = [float(value) for value in contact["boite"]]
     cx = (x_min + x_max) / 2
     cy = (y_min + y_max) / 2
@@ -96,22 +102,23 @@ def signature_contact(contact: dict, spatial_bucket: float = 24.0) -> tuple:
 def _rgb_to_hsv(pixels: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     pixels = pixels.astype(np.float32) / 255.0
     r, g, b = pixels[:, 0], pixels[:, 1], pixels[:, 2]
-    maximum = pixels.max(axis=1)
-    minimum = pixels.min(axis=1)
-    delta = maximum - minimum
+    
+    cmax = pixels.max(axis=1)
+    cmin = pixels.min(axis=1)
+    delta = cmax - cmin
 
-    hue = np.zeros_like(maximum)
+    hue = np.zeros_like(cmax)
     masque = delta > 1e-6
-    r_max = masque & (maximum == r)
-    g_max = masque & (maximum == g)
-    b_max = masque & (maximum == b)
+    r_max = masque & (cmax == r)
+    g_max = masque & (cmax == g)
+    b_max = masque & (cmax == b)
     hue[r_max] = (60 * ((g[r_max] - b[r_max]) / delta[r_max]) + 360) % 360
     hue[g_max] = 60 * ((b[g_max] - r[g_max]) / delta[g_max]) + 120
     hue[b_max] = 60 * ((r[b_max] - g[b_max]) / delta[b_max]) + 240
 
-    saturation = np.zeros_like(maximum)
-    saturation[maximum > 1e-6] = delta[maximum > 1e-6] / maximum[maximum > 1e-6]
-    return hue, saturation, maximum
+    saturation = np.zeros_like(cmax)
+    saturation[cmax > 1e-6] = delta[cmax > 1e-6] / cmax[cmax > 1e-6]
+    return hue, saturation, cmax
 
 
 def _nom_couleur_depuis_hue(hue: float) -> str:
@@ -130,7 +137,7 @@ def _nom_couleur_depuis_hue(hue: float) -> str:
     return "rose"
 
 
-def estimer_couleur_prise(image, resultats_prises, idx: int) -> tuple[str, float]:
+def estimer_couleur_prise(image, res_prises, idx: int) -> tuple[str, float]:
     if isinstance(image, (str, Path)):
         image = Image.open(image)
 
@@ -138,15 +145,15 @@ def estimer_couleur_prise(image, resultats_prises, idx: int) -> tuple[str, float
     hauteur, largeur = image_array.shape[:2]
 
     masque = None
-    if resultats_prises.masks is not None:
-        masque = resultats_prises.masks.data[idx].cpu().numpy().astype(bool)
+    if res_prises.masks is not None:
+        masque = res_prises.masks.data[idx].cpu().numpy().astype(bool)
         if masque.shape != (hauteur, largeur):
             masque = np.asarray(Image.fromarray(masque.astype(np.uint8) * 255).resize((largeur, hauteur))) > 0
 
     if masque is not None and masque.any():
         pixels = image_array[masque]
     else:
-        x_min, y_min, x_max, y_max = [int(round(value)) for value in resultats_prises.boxes.xyxy[idx].tolist()]
+        x_min, y_min, x_max, y_max = [int(round(value)) for value in res_prises.boxes.xyxy[idx].tolist()]
         x_min, y_min = max(0, x_min), max(0, y_min)
         x_max, y_max = min(largeur, x_max), min(hauteur, y_max)
         pixels = image_array[y_min:y_max, x_min:x_max].reshape(-1, 3)
@@ -167,6 +174,13 @@ def estimer_couleur_prise(image, resultats_prises, idx: int) -> tuple[str, float
     }
     couleur_neutre, ratio_neutre = max(neutres.items(), key=lambda item: item[1])
     if ratio_neutre > 0.6:
+<<<<<<< HEAD
+=======
+        return couleur_neutre, round(ratio_neutre, 2)
+
+    masque_colore = (saturation > 0.22) & (value > 0.18)
+    if masque_colore.sum() < max(8, nb_pixels * 0.08):
+>>>>>>> ac3c555 (beta_tracker)
         return couleur_neutre, round(ratio_neutre, 2)
 
     masque_colore = (saturation > 0.15) & (value > 0.2)
@@ -181,8 +195,8 @@ def estimer_couleur_prise(image, resultats_prises, idx: int) -> tuple[str, float
 
 
 def detect_contacts(
-    resultats_prises,
-    resultats_pose,
+    res_prises,
+    res_pose,
     seuil_confiance: float = DEFAULT_POSE_CONFIDENCE,
     distance_max_px: float = 18.0,
     seuil_confiance_prise: float = DEFAULT_HOLD_CONFIDENCE,
@@ -192,37 +206,34 @@ def detect_contacts(
     image=None,
     distance_max_frac: float | None = None,
 ) -> list[dict]:
-    # distance_max_frac: si fourni, remplace distance_max_px par cette fraction de la diagonale
-    # de l'image (ex: 0.05 = 5%). S'adapte automatiquement à toute résolution.
     articulations = articulations or ARTICULATIONS
     contacts = []
 
-    # Normalise le seuil de distance par rapport à la taille de l'image.
-    # distance_max_frac permet de passer un seuil indépendant de la résolution.
-    distance_max_eff = distance_max_px
+    # calcul de la distance max selon la def de l'image si demandée
+    dist_max = distance_max_px
     if distance_max_frac is not None:
-        orig_shape = getattr(resultats_pose, "orig_shape", None)
+        orig_shape = getattr(res_pose, "orig_shape", None)
         if orig_shape:
             h, w = orig_shape
-            distance_max_eff = distance_max_frac * (h**2 + w**2) ** 0.5
+            dist_max = distance_max_frac * (h**2 + w**2) ** 0.5
 
-    if resultats_pose.keypoints is None or len(resultats_pose.keypoints.data) == 0:
+    if res_pose.keypoints is None or len(res_pose.keypoints.data) == 0:
         return contacts
 
-    donnees_pose = resultats_pose.keypoints.data[0]
-    boites = resultats_prises.boxes.xyxy
+    kpts = res_pose.keypoints.data[0]
+    boxes = res_prises.boxes.xyxy
 
     for nom, idx_kp in articulations.items():
-        point = donnees_pose[idx_kp]
-        px, py, confiance = float(point[0]), float(point[1]), float(point[2])
+        point = kpts[idx_kp]
+        px, py, conf = float(point[0]), float(point[1]), float(point[2])
 
-        if confiance < seuil_confiance or (px == 0 and py == 0):
+        if conf < seuil_confiance or (px == 0 and py == 0):
             continue
 
         meilleur_contact = None
-        for i_boite, boite in enumerate(boites):
-            confiance_prise = float(resultats_prises.boxes.conf[i_boite])
-            if confiance_prise < seuil_confiance_prise:
+        for i_boite, boite in enumerate(boxes):
+            conf_prise = float(res_prises.boxes.conf[i_boite])
+            if conf_prise < seuil_confiance_prise:
                 continue
 
             x_min, y_min, x_max, y_max = [float(value) for value in boite.tolist()]
@@ -230,30 +241,30 @@ def detect_contacts(
             if surface < surface_min_prise:
                 continue
 
-            distance_boite = _distance_point_boite(px, py, boite.tolist())
-            if distance_boite > distance_max_eff:
+            dist_box = _distance_point_boite(px, py, boite.tolist())
+            if dist_box > dist_max:
                 continue
 
             couleur, confiance_couleur = (
-                estimer_couleur_prise(image, resultats_prises, i_boite) if image is not None else ("inconnue", 0.0)
+                estimer_couleur_prise(image, res_prises, i_boite) if image is not None else ("inconnue", 0.0)
             )
             if couleur_cible and couleur_cible != "toutes" and couleur != couleur_cible:
                 continue
 
-            distance_centre = _distance_point_centre(px, py, boite.tolist())
-            # Le bonus de confiance est borné à 30% de distance_max_eff pour rester proportionnel.
-            score = distance_boite + distance_centre * 0.05 - confiance_prise * (distance_max_eff * 0.3)
+            dist_center = _distance_point_centre(px, py, boite.tolist())
+            # bonus de confiance plafonné à 30%
+            score = dist_box + dist_center * 0.05 - conf_prise * (dist_max * 0.3)
             if meilleur_contact is None or score < meilleur_contact["score"]:
                 meilleur_contact = {
                     "score": score,
                     "articulation": nom,
                     "couleur_prise": couleur,
                     "confiance_couleur": confiance_couleur,
-                    "type_prise": get_type_prise(resultats_prises, i_boite),
-                    "confiance": round(confiance, 2),
-                    "confiance_pose": round(confiance, 2),
-                    "confiance_prise": round(confiance_prise, 2),
-                    "distance_px": round(distance_boite, 1),
+                    "type_prise": get_type_prise(res_prises, i_boite),
+                    "confiance": round(conf, 2),
+                    "confiance_pose": round(conf, 2),
+                    "confiance_prise": round(conf_prise, 2),
+                    "distance_px": round(dist_box, 1),
                     "point": (round(px, 1), round(py, 1)),
                     "boite": [round(float(value), 1) for value in boite.tolist()],
                 }
@@ -263,3 +274,45 @@ def detect_contacts(
             contacts.append(meilleur_contact)
 
     return contacts
+
+
+def render_annotation(
+    image_pil: Image.Image,
+    res_prises,
+    res_pose,
+    contacts: list,
+    seuil_conf_prise: float = DEFAULT_HOLD_CONFIDENCE,
+) -> np.ndarray:
+    img = np.array(image_pil.convert("RGB"))
+
+    for i, boite in enumerate(res_prises.boxes.xyxy):
+        if float(res_prises.boxes.conf[i]) < seuil_conf_prise:
+            continue
+        x1, y1, x2, y2 = [int(v) for v in boite.tolist()]
+        cv2.rectangle(img, (x1, y1), (x2, y2), (180, 180, 180), 1)
+
+    img = res_pose.plot(img=img, labels=False, line_width=2)
+
+    for c in contacts:
+        x1, y1, x2, y2 = [int(v) for v in c["boite"]]
+        color = COULEURS_MEMBRES.get(c["articulation"], (255, 220, 0))
+
+        overlay = img.copy()
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+        img = cv2.addWeighted(overlay, 0.28, img, 0.72, 0)
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
+
+        label = f"{c['articulation']}  {c['couleur_prise']}"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
+        label_y0 = max(th + 10, y1)
+        cv2.rectangle(img, (x1, label_y0 - th - 10), (x1 + tw + 6, label_y0), color, -1)
+        cv2.putText(
+            img, label, (x1 + 3, label_y0 - 4),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA,
+        )
+
+        px, py = int(c["point"][0]), int(c["point"][1])
+        cv2.circle(img, (px, py), 8, (255, 255, 255), -1)
+        cv2.circle(img, (px, py), 5, color, -1)
+
+    return img

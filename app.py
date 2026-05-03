@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from beta_tracker_core import (
     ARTICULATIONS,
+    COULEURS_MEMBRES,
     COULEURS_PRISES,
     DEFAULT_DISTANCE_MAX_FRAC,
     DEFAULT_HOLD_CONFIDENCE,
@@ -25,24 +26,19 @@ from beta_tracker_core import (
     HOLD_MODEL_PATH,
     POSE_MODEL_PATH,
     detect_contacts,
+    render_annotation,
     require_file,
     signature_contact,
 )
 
 st.set_page_config(page_title="Beta-Tracker", layout="wide")
 
-# ─── Couleurs membres ─────────────────────────────────────────────────────────
-_COULEURS_MEMBRES = {
-    "Poignet Gauche":  (255, 140,   0),
-    "Poignet Droit":   ( 30, 144, 255),
-    "Cheville Gauche": ( 50, 205,  50),
-    "Cheville Droite": (186,  85, 211),
-}
+# couleurs en hex pour streamlit
 _COULEURS_MEMBRES_HEX = {
-    k: "#{:02x}{:02x}{:02x}".format(*v) for k, v in _COULEURS_MEMBRES.items()
+    k: "#{:02x}{:02x}{:02x}".format(*v) for k, v in COULEURS_MEMBRES.items()
 }
 
-# ─── Sidebar ──────────────────────────────────────────────────────────────────
+# sidebar
 with st.sidebar:
     st.title("Paramètres")
 
@@ -89,67 +85,23 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-# ─── Session state ─────────────────────────────────────────────────────────
+# init du state
 if "sequence" not in st.session_state:
     st.session_state.sequence = []
 
-# ─── Modèles ──────────────────────────────────────────────────────────────────
+# chargement des modèles en cache
 @st.cache_resource
 def load_models():
     model_prises = YOLO(str(require_file(HOLD_MODEL_PATH, "Modele de prises")))
-    model_pose   = YOLO(str(require_file(POSE_MODEL_PATH, "Modele de pose")))
+    model_pose = YOLO(str(require_file(POSE_MODEL_PATH, "Modele de pose")))
     return model_prises, model_pose
 
 model_prises, model_pose = load_models()
 
-# ─── Rendu annoté ─────────────────────────────────────────────────────────────
-def render_annotation(
-    image_pil: Image.Image,
-    res_prises,
-    res_pose,
-    contacts: list,
-    seuil_conf_prise: float = 0.4,
-) -> np.ndarray:
-    img = np.array(image_pil.convert("RGB"))
-
-    for i, boite in enumerate(res_prises.boxes.xyxy):
-        if float(res_prises.boxes.conf[i]) < seuil_conf_prise:
-            continue
-        x1, y1, x2, y2 = [int(v) for v in boite.tolist()]
-        cv2.rectangle(img, (x1, y1), (x2, y2), (180, 180, 180), 1)
-
-    img = res_pose.plot(img=img, labels=False, line_width=2)
-
-    for c in contacts:
-        x1, y1, x2, y2 = [int(v) for v in c["boite"]]
-        color = _COULEURS_MEMBRES.get(c["articulation"], (255, 220, 0))
-
-        overlay = img.copy()
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
-        img = cv2.addWeighted(overlay, 0.28, img, 0.72, 0)
-        cv2.rectangle(img, (x1, y1), (x2, y2), color, 3)
-
-        label = f"{c['articulation']}  {c['couleur_prise']}"
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
-        label_y0 = max(th + 10, y1)
-        cv2.rectangle(img, (x1, label_y0 - th - 10), (x1 + tw + 6, label_y0), color, -1)
-        cv2.putText(
-            img, label, (x1 + 3, label_y0 - 4),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA,
-        )
-
-        px, py = int(c["point"][0]), int(c["point"][1])
-        cv2.circle(img, (px, py), 8, (255, 255, 255), -1)
-        cv2.circle(img, (px, py), 5, color, -1)
-
-    return img
-
-
-# ─── Analyse d'une image ──────────────────────────────────────────────────────
+# helpers
 def analyser_image(image: Image.Image, source_label: str) -> tuple[list[dict], np.ndarray, object, object]:
-    # Lance les modèles sur une image, retourne les contacts détectés.
     res_prises = model_prises(image)[0]
-    res_pose   = model_pose(image)[0]
+    res_pose = model_pose(image)[0]
     contacts   = detect_contacts(
         res_prises, res_pose,
         seuil_confiance=seuil_confiance,
@@ -166,11 +118,11 @@ def ajouter_a_sequence(contacts: list[dict], source: str):
     etape_base = len(st.session_state.sequence) + 1
     for i, c in enumerate(contacts):
         st.session_state.sequence.append({
-            "etape":         etape_base + i,
-            "articulation":  c["articulation"],
+            "etape": etape_base + i,
+            "articulation": c["articulation"],
             "couleur_prise": c["couleur_prise"],
-            "confiance":     c["confiance_pose"],
-            "source":        source,
+            "confiance": c["confiance_pose"],
+            "source": source,
         })
 
 
@@ -187,7 +139,7 @@ def afficher_contacts(contacts: list[dict]):
         )
 
 
-# ─── Export ───────────────────────────────────────────────────────────────────
+# exports
 def export_json(sequence: list) -> str:
     return json.dumps(
         {"beta": sequence, "export": datetime.now().isoformat()},
@@ -205,26 +157,22 @@ def export_csv(sequence: list) -> str:
     return output.getvalue()
 
 
-# ─── Header ───────────────────────────────────────────────────────────────────
 st.title("Beta-Tracker - Analyse d'escalade")
 st.caption("Détection des prises, posture du grimpeur et contacts main/pied sur image ou vidéo.")
 
 tab_images, tab_video, tab_sequence = st.tabs(["Images", "Vidéo", "Séquence et export"])
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — Images
-# ══════════════════════════════════════════════════════════════════════════════
+# tab images
 with tab_images:
     uploaded_files = st.file_uploader(
-        "Ajoutez une ou plusieurs images dans l'ordre chronologique",
+        "Importez vos images (l'ordre compte)",
         type=["jpg", "jpeg", "png"],
         accept_multiple_files=True,
-        help="L'ordre d'upload définit l'ordre de la séquence.",
     )
 
     if uploaded_files:
-        st.info(f"{len(uploaded_files)} image(s) sélectionnée(s). Lancez l'analyse quand tout est prêt.")
+        st.info(f"{len(uploaded_files)} image(s) sélectionnée(s).")
 
         if st.button("Analyser les images", type="primary", key="btn_analyse_images"):
             for uploaded_file in uploaded_files:
@@ -249,16 +197,13 @@ with tab_images:
                         ajouter_a_sequence(contacts, uploaded_file.name)
 
         if st.session_state.sequence:
-            st.success(f"Séquence mise à jour : {len(st.session_state.sequence)} mouvement(s) au total.")
+            st.success(f"Séquence maj : {len(st.session_state.sequence)} mouvement(s).")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — Vidéo
-# ══════════════════════════════════════════════════════════════════════════════
+# tab video
 with tab_video:
     st.markdown(
-        "Ajoutez une vidéo pour analyser les mouvements image par image. "
-        "Vous pouvez analyser seulement une image sur N pour aller plus vite."
+        "Import vidéo. Jouez sur le frame skip pour accélérer l'analyse."
     )
 
     video_file = st.file_uploader(
@@ -291,9 +236,9 @@ with tab_video:
                 st.error("Impossible d'ouvrir la vidéo.")
             else:
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                fps          = cap.get(cv2.CAP_PROP_FPS) or 25
-                width        = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                height       = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
                 st.info(f"Vidéo : {width}x{height} @ {fps:.1f} fps - {total_frames} frames totales")
 
@@ -309,14 +254,14 @@ with tab_video:
                     cap.release()
                     st.error("Impossible de créer la vidéo annotée.")
                 else:
-                    progress_bar  = st.progress(0, text="Traitement en cours...")
-                    status_txt    = st.empty()
+                    progress_bar = st.progress(0, text="Traitement en cours...")
+                    status_txt = st.empty()
                     contacts_video = []
-                    contacts_events = []
-                    active_signatures = {}
-                    frame_idx     = 0
-                    analysed      = 0
-                    limite        = max_frames if max_frames > 0 else float("inf")
+                    events = []
+                    active_sigs = {}
+                    frame_idx = 0
+                    analysed = 0
+                    limite = max_frames if max_frames > 0 else float("inf")
 
                     try:
                         while cap.isOpened() and analysed < limite:
@@ -328,9 +273,9 @@ with tab_video:
                                 continue
                             analysed += 1
 
-                            img_pil    = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                            img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                             res_prises = model_prises(img_pil, verbose=False)[0]
-                            res_pose   = model_pose(img_pil, verbose=False)[0]
+                            res_pose = model_pose(img_pil, verbose=False)[0]
 
                             contacts = detect_contacts(
                                 res_prises, res_pose,
@@ -348,26 +293,26 @@ with tab_video:
                             for c in contacts:
                                 contact_entry = {
                                     **c,
-                                    "frame":   frame_idx,
+                                    "frame": frame_idx,
                                     "temps_s": round(frame_idx / fps, 2),
                                 }
                                 contacts_video.append(contact_entry)
                                 current_articulations.add(c["articulation"])
 
                                 signature = signature_contact(contact_entry)
-                                if active_signatures.get(c["articulation"]) != signature:
-                                    contacts_events.append(contact_entry)
-                                    active_signatures[c["articulation"]] = signature
+                                if active_sigs.get(c["articulation"]) != signature:
+                                    events.append(contact_entry)
+                                    active_sigs[c["articulation"]] = signature
 
                             for articulation in ARTICULATIONS:
                                 if articulation not in current_articulations:
-                                    active_signatures.pop(articulation, None)
+                                    active_sigs.pop(articulation, None)
 
                             prog = min(analysed / (limite if max_frames > 0 else (total_frames / frame_skip + 1)), 1.0)
                             progress_bar.progress(prog, text=f"Image {frame_idx} / {total_frames}...")
                             status_txt.text(
                                 f"Analysées : {analysed} | Contacts bruts : {len(contacts_video)} "
-                                f"| Mouvements : {len(contacts_events)}"
+                                f"| Mouvements : {len(events)}"
                             )
                     finally:
                         cap.release()
@@ -377,7 +322,7 @@ with tab_video:
 
                     st.success(
                         f"{analysed} image(s) analysée(s) - {len(contacts_video)} contacts bruts, "
-                        f"{len(contacts_events)} mouvement(s) ajoutable(s)."
+                        f"{len(events)} mouvement(s) trouvé(s)."
                     )
 
                     if output_path.is_file():
@@ -389,36 +334,34 @@ with tab_video:
                             use_container_width=True,
                         )
 
-                    # Timeline contacts vidéo
+                # affichage timeline video
                     if contacts_video:
                         st.markdown("#### Contacts détectés dans la vidéo")
                         df_vid = pd.DataFrame([{
-                            "Temps (s)":    c["temps_s"],
-                            "Image":        c["frame"],
-                            "Membre":       c["articulation"],
-                            "Couleur":      c["couleur_prise"],
-                            "Conf. pose":   c["confiance_pose"],
-                            "Conf. prise":  c["confiance_prise"],
+                            "Temps (s)": c["temps_s"],
+                            "Image": c["frame"],
+                            "Membre": c["articulation"],
+                            "Couleur": c["couleur_prise"],
+                            "Conf. pose": c["confiance_pose"],
+                            "Conf. prise": c["confiance_prise"],
                         } for c in contacts_video])
                         st.dataframe(df_vid, use_container_width=True)
 
-                    if contacts_events:
+                    if events:
                         etape_base = len(st.session_state.sequence) + 1
-                        for i, c in enumerate(contacts_events):
+                        for i, c in enumerate(events):
                             st.session_state.sequence.append({
                                 "etape":         etape_base + i,
-                                "articulation":  c["articulation"],
+                                "articulation": c["articulation"],
                                 "couleur_prise": c["couleur_prise"],
-                                "confiance":     c["confiance_pose"],
-                                "source":        f"image {c['frame']} ({c['temps_s']}s)",
+                                "confiance": c["confiance_pose"],
+                                "source": f"image {c['frame']} ({c['temps_s']}s)",
                             })
 
-                        st.info(f"{len(contacts_events)} mouvement(s) ajouté(s) à la séquence.")
+                        st.info(f"{len(events)} mouvement(s) ajouté(s).")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — Séquence & Export
-# ══════════════════════════════════════════════════════════════════════════════
+# tab export sequence
 with tab_sequence:
     sequence = st.session_state.sequence
 
@@ -427,7 +370,7 @@ with tab_sequence:
     else:
         st.subheader(f"Béta reconstruit - {len(sequence)} mouvement(s)")
 
-        # ── Métriques rapides ────────────────────────────────────────────────
+        # stats rapides
         membres_counter = Counter(m["articulation"] for m in sequence)
         plus_actif, nb_plus_actif = membres_counter.most_common(1)[0]
         conf_moy = float(np.mean([m["confiance"] for m in sequence]))
@@ -440,7 +383,7 @@ with tab_sequence:
 
         st.divider()
 
-        # ── Timeline visuelle ────────────────────────────────────────────────
+        # timeline
         st.markdown("#### Timeline du béta")
         for m in sequence:
             hex_color  = _COULEURS_MEMBRES_HEX.get(m["articulation"], "#999")
@@ -461,7 +404,7 @@ with tab_sequence:
 
         st.divider()
 
-        # ── Graphiques ───────────────────────────────────────────────────────
+        # graphes
         col_g1, col_g2 = st.columns(2)
 
         with col_g1:
@@ -481,7 +424,7 @@ with tab_sequence:
 
         st.divider()
 
-        # ── Tableau complet ──────────────────────────────────────────────────
+        # recap
         with st.expander("Voir le tableau complet"):
             st.dataframe(
                 pd.DataFrame(sequence),
@@ -491,7 +434,7 @@ with tab_sequence:
 
         st.divider()
 
-        # ── Export ───────────────────────────────────────────────────────────
+        # actions d'export
         st.markdown("#### Exporter le béta")
         col_j, col_c = st.columns(2)
         with col_j:
