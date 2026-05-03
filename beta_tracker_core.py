@@ -166,7 +166,7 @@ def estimer_couleur_prise(image, resultats_prises, idx: int) -> tuple[str, float
         "grise": float(masque_gris.mean()),
     }
     couleur_neutre, ratio_neutre = max(neutres.items(), key=lambda item: item[1])
-    if ratio_neutre > 0.58:
+    if ratio_neutre > 0.6:
         return couleur_neutre, round(ratio_neutre, 2)
 
     masque_colore = (saturation > 0.22) & (value > 0.18)
