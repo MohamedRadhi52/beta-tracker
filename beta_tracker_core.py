@@ -157,9 +157,9 @@ def estimer_couleur_prise(image, resultats_prises, idx: int) -> tuple[str, float
     hue, saturation, value = _rgb_to_hsv(pixels)
     nb_pixels = len(pixels)
 
-    masque_noir = value < 0.22
-    masque_blanc = (value > 0.72) & (saturation < 0.18)
-    masque_gris = (value >= 0.22) & (saturation < 0.16)
+    masque_noir = value < 0.2
+    masque_blanc = (value > 0.8) & (saturation < 0.15)
+    masque_gris = (value >= 0.2) & (saturation < 0.15)
     neutres = {
         "noire": float(masque_noir.mean()),
         "blanche": float(masque_blanc.mean()),
@@ -169,7 +169,7 @@ def estimer_couleur_prise(image, resultats_prises, idx: int) -> tuple[str, float
     if ratio_neutre > 0.6:
         return couleur_neutre, round(ratio_neutre, 2)
 
-    masque_colore = (saturation > 0.22) & (value > 0.18)
+    masque_colore = (saturation > 0.15) & (value > 0.2)
     if masque_colore.sum() < max(8, nb_pixels * 0.08):
         return couleur_neutre, round(ratio_neutre, 2)
 
